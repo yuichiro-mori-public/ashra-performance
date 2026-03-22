@@ -41,7 +41,7 @@ html, body {
 
   debug.textContent = serial;
 
-  // Blink 互換モード
+  // Blink 互換
   var text = params.get('text');
   if (text) {
     screen.style.backgroundColor = '#111';
@@ -49,95 +49,117 @@ html, body {
     return;
   }
 
-  // ── フレームデータをハッシュフラグメントから取得 ──
-  // URL: ...#ff0000,00ff00,0000ff,...  (各フレームの色をカンマ区切り、#なし可)
-  var hash = location.hash.substring(1); // '#' を除去
+  // フレームデータをハッシュから取得
+  var hash = location.hash.substring(1);
   if (!hash) {
-    // フォールバック: frames_url パラメータから fetch
-    var framesUrl = params.get('frames_url');
-    var x = parseInt(params.get('x') || '0', 10);
-    var y = parseInt(params.get('y') || '0', 10);
-    if (framesUrl) {
-      status.textContent = 'Loading...';
-      fetch(framesUrl)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var frames = data.frames || data;
-          var myFrames = [];
-          for (var i = 0; i < frames.length; i++) {
-            if (frames[i][y] && frames[i][y][x]) {
-              myFrames.push(frames[i][y][x]);
-            } else {
-              myFrames.push('#000000');
-            }
-          }
-          status.textContent = '';
-          playFrames(myFrames);
-        })
-        .catch(function(e) { status.textContent = 'Error: ' + e.message; });
-    } else {
-      status.textContent = 'No frame data';
-    }
+    status.textContent = 'No frame data';
     return;
   }
 
-  // ハッシュからフレーム配列をパース
-  var myFrames = hash.split(',').map(function(c) {
+  var frames = hash.split(',').map(function(c) {
     c = c.trim();
     if (c.charAt(0) !== '#') c = '#' + c;
     return c;
   });
 
-  status.textContent = '';
-  playFrames(myFrames);
+  if (frames.length === 0) {
+    status.textContent = 'No frames';
+    return;
+  }
 
-  // ── 再生 ──
-  function playFrames(frames) {
-    var totalFrames = frames.length;
-    if (totalFrames === 0) { status.textContent = 'No frames'; return; }
+  // ── 時刻補正: サーバー時刻との差分を計算 ──
+  // worldtimeapi.org から正確な時刻を取得して、端末時計のズレを補正
+  status.textContent = 'Syncing...';
 
-    var interval = 1000 / fps;
-    var frameIdx = 0;
-    var lastColor = '';
+  getTimeOffset(function(offset) {
+    debug.textContent = serial + ' offset:' + offset + 'ms';
+    status.textContent = '';
+    playFrames(frames, offset);
+  });
 
-    // start タイムスタンプで同期
-    if (startTs > 0) {
-      var elapsed = Date.now() - startTs;
-      if (elapsed > 0) {
-        frameIdx = Math.floor(elapsed / interval);
-        if (frameIdx >= totalFrames) {
-          screen.style.backgroundColor = '#000';
-          return;
-        }
-      }
+  function getTimeOffset(callback) {
+    // 複数回計測して中央値を取る
+    var offsets = [];
+    var attempts = 0;
+    var maxAttempts = 3;
+
+    function measure() {
+      var t0 = Date.now();
+      fetch('https://worldtimeapi.org/api/ip')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var t1 = Date.now();
+          var rtt = t1 - t0;
+          // サーバー時刻 (ms) + RTT/2 = 推定正確時刻
+          var serverMs = new Date(data.datetime).getTime();
+          var estimatedNow = serverMs + Math.floor(rtt / 2);
+          var localNow = t1;
+          offsets.push(estimatedNow - localNow);
+
+          attempts++;
+          if (attempts < maxAttempts) {
+            setTimeout(measure, 100);
+          } else {
+            // 中央値
+            offsets.sort(function(a, b) { return a - b; });
+            var median = offsets[Math.floor(offsets.length / 2)];
+            callback(median);
+          }
+        })
+        .catch(function() {
+          // API失敗時はオフセット0で続行
+          attempts++;
+          if (attempts < maxAttempts) {
+            setTimeout(measure, 100);
+          } else {
+            offsets.sort(function(a, b) { return a - b; });
+            callback(offsets.length > 0 ? offsets[Math.floor(offsets.length / 2)] : 0);
+          }
+        });
     }
+    measure();
+  }
+
+  function playFrames(fr, clockOffset) {
+    var totalFrames = fr.length;
+    var interval = 1000 / fps;
+    var lastColor = '';
+    var lastIdx = -1;
 
     function tick() {
-      if (frameIdx >= totalFrames) {
+      // 補正済み現在時刻
+      var correctedNow = Date.now() + clockOffset;
+      var elapsed = correctedNow - startTs;
+
+      if (elapsed < 0) {
+        // まだ開始前
+        var secLeft = Math.ceil(-elapsed / 1000);
+        status.textContent = secLeft + '...';
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      status.textContent = '';
+      var idx = Math.floor(elapsed / interval);
+
+      if (idx >= totalFrames) {
         screen.style.backgroundColor = '#000';
         return;
       }
-      var color = frames[frameIdx];
-      if (color !== lastColor) {
-        screen.style.backgroundColor = color;
-        lastColor = color;
+
+      if (idx !== lastIdx) {
+        var color = fr[idx];
+        if (color !== lastColor) {
+          screen.style.backgroundColor = color;
+          lastColor = color;
+        }
+        lastIdx = idx;
       }
-      frameIdx++;
-      setTimeout(tick, interval);
+
+      requestAnimationFrame(tick);
     }
 
-    // 開始時刻まで待機
-    if (startTs > 0) {
-      var delay = startTs - Date.now();
-      if (delay > 0) {
-        status.textContent = 'Starting in ' + Math.ceil(delay / 1000) + 's...';
-        setTimeout(function() { status.textContent = ''; tick(); }, delay);
-      } else {
-        tick();
-      }
-    } else {
-      tick();
-    }
+    requestAnimationFrame(tick);
   }
 
 })();
