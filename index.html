@@ -16,16 +16,17 @@ html, body {
   color: rgba(255,255,255,0.15); font: 9px monospace;
   pointer-events: none;
 }
-#status {
+#countdown {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
-  color: rgba(255,255,255,0.4); font: 14px monospace; text-align: center;
+  color: rgba(255,255,255,0.3); font: bold 20vw monospace;
+  pointer-events: none;
 }
 </style>
 </head>
 <body>
 <div id="screen"></div>
 <div id="debug"></div>
-<div id="status"></div>
+<div id="countdown"></div>
 <script>
 (function() {
   'use strict';
@@ -37,7 +38,7 @@ html, body {
 
   var screen = document.getElementById('screen');
   var debug = document.getElementById('debug');
-  var status = document.getElementById('status');
+  var countdown = document.getElementById('countdown');
 
   debug.textContent = serial;
 
@@ -51,10 +52,7 @@ html, body {
 
   // フレームデータをハッシュから取得
   var hash = location.hash.substring(1);
-  if (!hash) {
-    status.textContent = 'No frame data';
-    return;
-  }
+  if (!hash) { countdown.textContent = '?'; return; }
 
   var frames = hash.split(',').map(function(c) {
     c = c.trim();
@@ -62,105 +60,48 @@ html, body {
     return c;
   });
 
-  if (frames.length === 0) {
-    status.textContent = 'No frames';
-    return;
-  }
+  if (frames.length === 0) { countdown.textContent = '?'; return; }
 
-  // ── 時刻補正: サーバー時刻との差分を計算 ──
-  // worldtimeapi.org から正確な時刻を取得して、端末時計のズレを補正
-  status.textContent = 'Syncing...';
+  var totalFrames = frames.length;
+  var interval = 1000 / fps;
+  var lastColor = '';
+  var lastIdx = -1;
 
-  getTimeOffset(function(offset) {
-    debug.textContent = serial + ' offset:' + offset + 'ms';
-    status.textContent = '';
-    playFrames(frames, offset);
-  });
+  // requestAnimationFrame ベースの絶対時刻再生
+  // start はサーバー側で端末の時計に合わせて補正済み
+  function tick() {
+    var now = Date.now();
+    var elapsed = now - startTs;
 
-  function getTimeOffset(callback) {
-    // 複数回計測して中央値を取る
-    var offsets = [];
-    var attempts = 0;
-    var maxAttempts = 3;
-
-    function measure() {
-      var t0 = Date.now();
-      fetch('https://worldtimeapi.org/api/ip')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var t1 = Date.now();
-          var rtt = t1 - t0;
-          // サーバー時刻 (ms) + RTT/2 = 推定正確時刻
-          var serverMs = new Date(data.datetime).getTime();
-          var estimatedNow = serverMs + Math.floor(rtt / 2);
-          var localNow = t1;
-          offsets.push(estimatedNow - localNow);
-
-          attempts++;
-          if (attempts < maxAttempts) {
-            setTimeout(measure, 100);
-          } else {
-            // 中央値
-            offsets.sort(function(a, b) { return a - b; });
-            var median = offsets[Math.floor(offsets.length / 2)];
-            callback(median);
-          }
-        })
-        .catch(function() {
-          // API失敗時はオフセット0で続行
-          attempts++;
-          if (attempts < maxAttempts) {
-            setTimeout(measure, 100);
-          } else {
-            offsets.sort(function(a, b) { return a - b; });
-            callback(offsets.length > 0 ? offsets[Math.floor(offsets.length / 2)] : 0);
-          }
-        });
-    }
-    measure();
-  }
-
-  function playFrames(fr, clockOffset) {
-    var totalFrames = fr.length;
-    var interval = 1000 / fps;
-    var lastColor = '';
-    var lastIdx = -1;
-
-    function tick() {
-      // 補正済み現在時刻
-      var correctedNow = Date.now() + clockOffset;
-      var elapsed = correctedNow - startTs;
-
-      if (elapsed < 0) {
-        // まだ開始前
-        var secLeft = Math.ceil(-elapsed / 1000);
-        status.textContent = secLeft + '...';
-        requestAnimationFrame(tick);
-        return;
-      }
-
-      status.textContent = '';
-      var idx = Math.floor(elapsed / interval);
-
-      if (idx >= totalFrames) {
-        screen.style.backgroundColor = '#000';
-        return;
-      }
-
-      if (idx !== lastIdx) {
-        var color = fr[idx];
-        if (color !== lastColor) {
-          screen.style.backgroundColor = color;
-          lastColor = color;
-        }
-        lastIdx = idx;
-      }
-
+    if (elapsed < 0) {
+      // カウントダウン
+      var sec = Math.ceil(-elapsed / 1000);
+      countdown.textContent = sec > 5 ? '' : String(sec);
       requestAnimationFrame(tick);
+      return;
+    }
+
+    countdown.textContent = '';
+    var idx = Math.floor(elapsed / interval);
+
+    if (idx >= totalFrames) {
+      screen.style.backgroundColor = '#000';
+      return;
+    }
+
+    if (idx !== lastIdx) {
+      var color = frames[idx];
+      if (color !== lastColor) {
+        screen.style.backgroundColor = color;
+        lastColor = color;
+      }
+      lastIdx = idx;
     }
 
     requestAnimationFrame(tick);
   }
+
+  requestAnimationFrame(tick);
 
 })();
 </script>
