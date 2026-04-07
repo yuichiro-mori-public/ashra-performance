@@ -63,15 +63,6 @@
     "created_at": "2026-03-23T17:56:01+09:00"
   },
   {
-    "name": "performance_8",
-    "fps": 10,
-    "cols": 10,
-    "rows": 5,
-    "total_frames": 2400,
-    "total_sec": 240.0,
-    "created_at": "2026-03-23T18:06:51+09:00"
-  },
-  {
     "name": "performance_9",
     "fps": 10,
     "cols": 42,
@@ -88,5 +79,14 @@
     "total_frames": 9000,
     "total_sec": 900.0,
     "created_at": "2026-03-24T15:07:50+09:00"
+  },
+  {
+    "name": "performance_8",
+    "fps": 10,
+    "cols": 42,
+    "rows": 7,
+    "total_frames": 3000,
+    "total_sec": 300.0,
+    "created_at": "2026-04-07T14:52:19+09:00"
   }
 ]
